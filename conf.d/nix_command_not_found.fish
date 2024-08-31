@@ -78,8 +78,11 @@ function fish_command_not_found -a command_not_found
     end
 
     set_color normal
+
     set -l reset (set_color normal)
     set -l yellow (set_color yellow)
+    set -l bi (set_color --bold --italics)
+    set -l dim (set_color --dim)
 
     if test $in_nixpkgs -eq 0
         printf '%s%s%s: command not found in %s<nixpkgs>%s\n' (set_color red) $command_not_found $reset (set_color magenta) $reset
@@ -117,11 +120,31 @@ function fish_command_not_found -a command_not_found
             # printf '\t[%s%d%s] ' $yellow $i $reset
             # TODO: color index differently if abbr already exist
             # printf $fmtstr $yellow $i $reset
+
+
+
+            # hyperlink in terminal standard: https://gist.github.com/egmontkob/eb114294efbcd5adb1944c9f3cb5feda
+            set -l channel unstable
+            set -l url "https://search.nixos.org/packages?channel=$channel&show=$pkg&from=0&size=1&type=packages&query=$pkg"
+            printf '\t'
+
             set -l prompt
-            if test $nix_command_enabled -eq 1
-                set prompt "nix shell nixpkgs#$pkg"
+            if test $nix_command_enabled -eq 2
+                printf "%snix%s %sshell%s " (set_color $fish_color_command) $reset (set_color $fish_color_param) $reset
+                printf "\e]8;;"
+                printf '%s' $url
+                printf '\e\\'
+                printf '%snixpkgs#%s%s' (set_color $fish_color_param) $pkg $reset
+                printf '\e]8;;\e\\'
+                printf '\n'
             else
-                set prompt "nix-shell -p $pkg"
+                printf "%snix-shell%s %s-p%s " (set_color $fish_color_command) $reset (set_color $fish_color_option) $reset
+                printf "\e]8;;"
+                printf '%s' $url
+                printf '\e\\'
+                printf '%s%s%s' (set_color $fish_color_param) $pkg $reset
+                printf '\e]8;;\e\\'
+                printf '\n'
             end
             # set -l a nsh$i
             # if not abbr -q $a
@@ -129,8 +152,13 @@ function fish_command_not_found -a command_not_found
             #     set -a __nix_command_not_found_ephemeral_abbrs_created $a
             # end
 
-            printf '\t'
-            echo $prompt | fish_indent --ansi
+
+
+            # printf '%s' $var
+            # printf ' %s %s %s\n' $postfix_color $postfix $reset
+
+
+            # echo $prompt | fish_indent --ansi
             # set i (math "$i + 1")
         end
 
@@ -143,9 +171,6 @@ function fish_command_not_found -a command_not_found
         #     functions --erase (status function) # delete itself, to create a oneshot hook
         # end
 
-        set -l reset (set_color normal)
-        set -l bi (set_color --bold --italics)
-        set -l dim (set_color --dim)
 
         if command -q ,
             printf "\n%sor: (since you have %shttps://github.com/nix-community/comma%s%s installed)%s\n" $dim $bi $reset $dim $reset
@@ -211,13 +236,22 @@ function fish_command_not_found -a command_not_found
         set -l close_matches (path filter -x $PATH/* | path basename | sort --unique | get_close_matches $command_not_found $nix_command_not_found_suggest_close_matches_n $nix_command_not_found_suggest_close_matches_cutoff)
 
         set -l n_close_matches (count $close_matches)
+        # echo "n_close_matches : $n_close_matches "
+        # printf '-%s\n' $close_matches
+
         if test $n_close_matches -gt 0
             echo
             if test $n_close_matches -eq 1
-                printf '%sThere is %s%s%d%s%s other program in your %s%s$PATH%s%s with a similar name:%s\n' $dim $reset (set_color $fish_color_command) $n_close_matches $reset $dim $reset (set_color $fish_color_param) $reset $dim $reset
+                printf '%sThere is %s%s%d%s%s other program in your %s%s$PATH%s%s with a similar name:%s\n' \ 
+                $dim $reset \
+                    (set_color $fish_color_command) $n_close_matches $reset \
+                    $dim $reset (set_color $fish_color_param) $reset $dim $reset
             else
                 # > 1
-                printf '%sThere are %s%s%d%s%s other programs in your %s%s$PATH%s%s with a similar name:%s\n' $dim $reset (set_color $fish_color_command) $n_close_matches $reset $dim $reset (set_color $fish_color_param) $reset $dim $reset
+                printf '%sThere are %s%s%d%s%s other programs in your %s%s$PATH%s%s with a similar name:%s\n' \
+                    $dim $reset \
+                    (set_color $fish_color_command) $n_close_matches $reset \
+                    $dim $reset (set_color $fish_color_param) $reset $dim $reset
             end
             # echo
         end
@@ -227,6 +261,7 @@ function fish_command_not_found -a command_not_found
             if string match --index --regex "$command_not_found" $exe | read -l start offset
                 # echo "exe: $exe"
                 # echo "start: $start, offset: $offset"
+                # FIXME: case where is a prefix is wrong "git" "gitui" -> "giti"
                 set -l before (string sub --start=1 --length=(math "$start - 1") -- $exe)
                 set -l match (string sub --start=$start --length=$offset -- $exe)
                 set -l after (string sub --start=(math "$start + $offset + 1") -- $exe)
@@ -236,14 +271,17 @@ function fish_command_not_found -a command_not_found
                     (set_color $fish_color_command --italics) $match $reset \
                     (set_color $fish_color_command --dim) $after $reset
 
-                if functions -q nix-store-highlight
-                    printf '\t %s->%s ' $dim $reset
-                    command --search $exe | path resolve | nix-store-highlight
-
-                else
-                    echo
-                end
+            else
+                printf '\t%s%s%s' (set_color $fish_color_command --dim) $exe $reset
             end
+
+            printf '\t %s->%s ' $dim $reset
+            if functions -q nix-store-highlight
+                command --search $exe | path resolve | nix-store-highlight
+            else
+                command --search $exe | path resolve
+            end
+            # echo
         end
     end
 
@@ -286,8 +324,8 @@ function fish_command_not_found -a command_not_found
     #     # end
     # end
 
-    # TODO: also suggest matching `functions`
 
+    # TODO: also suggest matching `abbr --list` abbreviations
     set -q nix_command_not_found_suggest_close_functions_n
     or set -U nix_command_not_found_suggest_close_functions_n 5
     set -q nix_command_not_found_suggest_close_functions_cutoff
@@ -316,6 +354,7 @@ function fish_command_not_found -a command_not_found
             if string match --index --regex "$command_not_found" $fn | read -l start offset
                 # echo "exe: $exe"
                 # echo "start: $start, offset: $offset"
+                # FIXME: case where is a prefix is wrong "git" "gitui" -> "giti"
                 set -l before (string sub --start=1 --length=(math "$start - 1") -- $fn)
                 set -l match (string sub --start=$start --length=$offset -- $fn)
                 set -l after (string sub --start=(math "$start + $offset + 1") -- $fn)
@@ -325,9 +364,11 @@ function fish_command_not_found -a command_not_found
                     (set_color $fish_color_command --italics) $match $reset \
                     (set_color $fish_color_command --dim) $after $reset
             else
-                printf '\t%s%s%s' (set_color $fish_color_command) $fn $reset
+                printf '\t%s%s%s' (set_color $fish_color_command --dim) $fn $reset
             end
             printf '\t %s->%s %s%s\n' $dim $reset (functions --details $fn | string replace $HOME "~" | string replace --regex "(\.config/fish/functions)" "$(set_color blue --dim)\$1$(set_color normal)") $reset
         end
     end
+
+    # TODO: look through $PWD/* for executables and check those names, and if close then suggest the relative path to it
 end
