@@ -108,7 +108,7 @@ function fish_command_not_found -a command_not_found
             printf '\t'
 
             set -l prompt
-            if test $nix_command_enabled -eq 2
+            if test $nix_command_enabled -eq 1
                 # TODO: does this depend on 
                 # experimental-features = ["nix-command" "flakes"];
                 printf "%snix%s %sshell%s " (set_color $fish_color_command) $reset (set_color $fish_color_param) $reset
