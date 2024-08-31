@@ -100,29 +100,8 @@ function fish_command_not_found -a command_not_found
         and contains -- flakes $experimental_features
         and set nix_command_enabled 1
 
-        # TODO: does this depend on 
-        # experimental-features = ["nix-command" "flakes"];
 
-        if set -q __nix_command_not_found_ephemeral_abbrs_created
-            # Erase abbreviations from the previous time `fish_command_not_found` was called this shell session
-            # reason: If the previous invocation generated 4 abbreviations, and the currrent generates 2, then
-            # nsh{3,4} will "float around" and confusingly map to another program.
-            for a in $__nix_command_not_found_ephemeral_abbrs_created
-                abbr --erase $a
-            end
-        end
-        set -g __nix_command_not_found_ephemeral_abbrs_created
-
-        # set -l i 1
-        # set -l width (math "floor(log $(count $pkgs)) + 1")
-        # set -l fmtstr (string join '' "\t[%s%$width" "d%s] ")
         for pkg in $pkgs
-            # printf '\t[%s%d%s] ' $yellow $i $reset
-            # TODO: color index differently if abbr already exist
-            # printf $fmtstr $yellow $i $reset
-
-
-
             # hyperlink in terminal standard: https://gist.github.com/egmontkob/eb114294efbcd5adb1944c9f3cb5feda
             set -l channel unstable
             set -l url "https://search.nixos.org/packages?channel=$channel&show=$pkg&from=0&size=1&type=packages&query=$pkg"
@@ -130,6 +109,8 @@ function fish_command_not_found -a command_not_found
 
             set -l prompt
             if test $nix_command_enabled -eq 2
+                # TODO: does this depend on 
+                # experimental-features = ["nix-command" "flakes"];
                 printf "%snix%s %sshell%s " (set_color $fish_color_command) $reset (set_color $fish_color_param) $reset
                 printf "\e]8;;"
                 printf '%s' $url
@@ -146,44 +127,13 @@ function fish_command_not_found -a command_not_found
                 printf '\e]8;;\e\\'
                 printf '\n'
             end
-            # set -l a nsh$i
-            # if not abbr -q $a
-            #     abbr -a $a $prompt
-            #     set -a __nix_command_not_found_ephemeral_abbrs_created $a
-            # end
-
-
-
-            # printf '%s' $var
-            # printf ' %s %s %s\n' $postfix_color $postfix $reset
-
-
-            # echo $prompt | fish_indent --ansi
-            # set i (math "$i + 1")
         end
-
-        # TODO: notify abbrs been created
-
-        # function __nix_command_not_found_on_preexec --on-event fish_preexec
-        #     for a in $__nix_command_not_found_ephemeral_abbrs_created
-        #         abbr --erase $a
-        #     end
-        #     functions --erase (status function) # delete itself, to create a oneshot hook
-        # end
-
 
         if command -q ,
             printf "\n%sor: (since you have %shttps://github.com/nix-community/comma%s%s installed)%s\n" $dim $bi $reset $dim $reset
             printf '\t'
             echo ", $argv" | fish_indent --ansi
         end
-
-        # printf '\n%sread more about the suggested packages at:%s\n' $dim $reset
-        # # TODO: detect channel
-        # set -l channel unstable
-        # # TODO: detect if terminal emulator has support for OSC hyperlinks and use them if available
-        # set -l url "https://search.nixos.org/packages?channel=$channel&show=$pkgs[1]&from=0&size=50&sort=relevance&type=packages&query=$argv"
-        # printf '\t%s%s%s\n' $bi $url $reset
 
         begin
             # TODO: figure out if this is a useful idea
@@ -222,9 +172,6 @@ function fish_command_not_found -a command_not_found
 
     end
 
-    # set -l similar_executable_names
-    # set -l all_executable_names (path filter -x $PATH/* | path basename)
-
     set -q nix_command_not_found_suggest_close_matches_n
     or set -U nix_command_not_found_suggest_close_matches_n 10
     set -q nix_command_not_found_suggest_close_matches_cutoff
@@ -233,11 +180,9 @@ function fish_command_not_found -a command_not_found
     set -q nix_command_not_found_suggest_close_matches
     or set -U nix_command_not_found_suggest_close_matches 1
     if test $nix_command_not_found_suggest_close_matches -eq 1
-        set -l close_matches (path filter -x $PATH/* | path basename | sort --unique | get_close_matches $command_not_found $nix_command_not_found_suggest_close_matches_n $nix_command_not_found_suggest_close_matches_cutoff)
+        set -l close_matches (path filter -xf $PATH/* | path basename | sort --unique | get_close_matches $command_not_found $nix_command_not_found_suggest_close_matches_n $nix_command_not_found_suggest_close_matches_cutoff)
 
         set -l n_close_matches (count $close_matches)
-        # echo "n_close_matches : $n_close_matches "
-        # printf '-%s\n' $close_matches
 
         if test $n_close_matches -gt 0
             echo
@@ -259,12 +204,9 @@ function fish_command_not_found -a command_not_found
         for exe in $close_matches
             # find substring in match
             if string match --index --regex "$command_not_found" $exe | read -l start offset
-                # echo "exe: $exe"
-                # echo "start: $start, offset: $offset"
-                # FIXME: case where is a prefix is wrong "git" "gitui" -> "giti"
                 set -l before (string sub --start=1 --length=(math "$start - 1") -- $exe)
                 set -l match (string sub --start=$start --length=$offset -- $exe)
-                set -l after (string sub --start=(math "$start + $offset + 1") -- $exe)
+                set -l after (string sub --start=(math "$start + $offset") -- $exe)
 
                 printf '\t%s%s%s%s%s%s%s%s%s' \
                     (set_color $fish_color_command --dim) $before $reset \
@@ -349,15 +291,11 @@ function fish_command_not_found -a command_not_found
         end
 
         for fn in $close_matches
-            # echo $fn
             # find substring in match
             if string match --index --regex "$command_not_found" $fn | read -l start offset
-                # echo "exe: $exe"
-                # echo "start: $start, offset: $offset"
-                # FIXME: case where is a prefix is wrong "git" "gitui" -> "giti"
                 set -l before (string sub --start=1 --length=(math "$start - 1") -- $fn)
                 set -l match (string sub --start=$start --length=$offset -- $fn)
-                set -l after (string sub --start=(math "$start + $offset + 1") -- $fn)
+                set -l after (string sub --start=(math "$start + $offset") -- $fn)
 
                 printf '\t%s%s%s%s%s%s%s%s%s' \
                     (set_color $fish_color_command --dim) $before $reset \
@@ -371,4 +309,5 @@ function fish_command_not_found -a command_not_found
     end
 
     # TODO: look through $PWD/* for executables and check those names, and if close then suggest the relative path to it
+    # Probably need a pretty elaborate filter not to include a lot of .so files in rust ./target folder or cmake ./build folder
 end
