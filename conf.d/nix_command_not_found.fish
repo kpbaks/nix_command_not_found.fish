@@ -1,3 +1,8 @@
+status is-interactive; or return
+# IDEA: extend to work with other package managers, like apt, dnf, pacman etc.
+# FIXME: patterns that do not get highlighted:
+# - /nix/store/nd1hjghxhpgy4nkch72xic9mancvy39v-logout/bin/logout
+
 if not test -f /run/current-system/sw/bin/command-not-found
     set -l reset (set_color normal)
     set -l ns (status filename | path basename)
@@ -7,10 +12,10 @@ if not test -f /run/current-system/sw/bin/command-not-found
     return
 end
 
-
 function get_close_matches -a word n cutoff
     argparse --min-args=3 --max-args=3 -- $argv; or return 2
     isatty stdin; and return 2
+    command -q python; or return
 
     # echo "n: $n, cutoff: $cutoff" >&2
     # string match --regex --quiet '^\s*$' -- $n
@@ -45,11 +50,13 @@ end
 
 # Redefine `fish_command_not_found` to make the output of `/run/current-system/sw/bin/command-not-found`
 # more visually appealing.
-# NOTE: The output of `command-not-found` is assumed to match the output of 
+# NOTE: The output of `command-not-found` is assumed to match the output of
 # https://github.com/NixOS/nixpkgs/blob/8291dd11ac3d35a0d72ab8fa06c05c264ffb512d/nixos/modules/programs/command-not-found/command-not-found.pl
 # as seen in commit 363ef08. Newer commits are likely to work.
 function fish_command_not_found -a command_not_found
     # TODO: improvement ideas
+    # check across all `nix registry list`
+    # Print the name/version of the registry that provides the binary
     # check if ./flake.nix exist, and contains a `devShells` output attribute, and suggest the package be added
     # to `devShells.buildInputs` or `devShells.nativeBuildInputs` or `devShells.packages`
     # check of ./devenv.nix exist
@@ -100,18 +107,20 @@ function fish_command_not_found -a command_not_found
         and contains -- flakes $experimental_features
         and set nix_command_enabled 1
 
-
         for pkg in $pkgs
             # hyperlink in terminal standard: https://gist.github.com/egmontkob/eb114294efbcd5adb1944c9f3cb5feda
             set -l channel unstable
             set -l url "https://search.nixos.org/packages?channel=$channel&show=$pkg&from=0&size=1&type=packages&query=$pkg"
             printf '\t'
 
+            # TODO: also suggest a `nix run` expression
             set -l prompt
             if test $nix_command_enabled -eq 1
-                # TODO: does this depend on 
+                # TODO: does this depend on
                 # experimental-features = ["nix-command" "flakes"];
                 printf "%snix%s %sshell%s " (set_color $fish_color_command) $reset (set_color $fish_color_param) $reset
+                # FIXME: this is not the right way to use `--reference-lock-file`
+                # test -f flake.lock; and printf '%s%s%s %s%s%s ' (set_color $fish_color_option) --reference-lock-file $reset (set_color $fish_color_param) flake.lock $reset
                 printf "\e]8;;"
                 printf '%s' $url
                 printf '\e\\'
@@ -137,6 +146,7 @@ function fish_command_not_found -a command_not_found
 
         begin
             # TODO: figure out if this is a useful idea
+            # HINT: find the /nix/store/*.drv that corresponds to the current active `outputs.devShells.${system}.*` attribute
 
             # if test -f ./flake.nix
             #     set -l jq_program
@@ -172,14 +182,17 @@ function fish_command_not_found -a command_not_found
 
     end
 
+    # TODO: support prefix, fuzzy and substring matching
+
     set -q nix_command_not_found_suggest_close_matches_n
-    or set -U nix_command_not_found_suggest_close_matches_n 10
+    or set -U nix_command_not_found_suggest_close_matches_n 8
     set -q nix_command_not_found_suggest_close_matches_cutoff
-    or set -U nix_command_not_found_suggest_close_matches_cutoff 0.2
+    or set -U nix_command_not_found_suggest_close_matches_cutoff 0.6
 
     set -q nix_command_not_found_suggest_close_matches
     or set -U nix_command_not_found_suggest_close_matches 1
     if test $nix_command_not_found_suggest_close_matches -eq 1
+        # TODO: handle case where the same binary is in multiple directories `which --all`
         set -l close_matches (path filter -xf $PATH/* | path basename | sort --unique | get_close_matches $command_not_found $nix_command_not_found_suggest_close_matches_n $nix_command_not_found_suggest_close_matches_cutoff)
 
         set -l n_close_matches (count $close_matches)
@@ -187,18 +200,26 @@ function fish_command_not_found -a command_not_found
         if test $n_close_matches -gt 0
             echo
             if test $n_close_matches -eq 1
-                printf '%sThere is %s%s%d%s%s other program in your %s%s$PATH%s%s with a similar name:%s\n' \ 
-                $dim $reset \
+                printf '%sThere is %s%s%d%s%s other program in your %s%s$PATH%s%s with a similar name:%s\n' \
+                    $dim $reset \
                     (set_color $fish_color_command) $n_close_matches $reset \
                     $dim $reset (set_color $fish_color_param) $reset $dim $reset
             else
                 # > 1
-                printf '%sThere are %s%s%d%s%s other programs in your %s%s$PATH%s%s with a similar name:%s\n' \
+
+                printf '%sThere are %s%s%d%s%s other programs in your %s%s$PATH%s%s with similar prefixes:%s\n' \
                     $dim $reset \
                     (set_color $fish_color_command) $n_close_matches $reset \
                     $dim $reset (set_color $fish_color_param) $reset $dim $reset
             end
             # echo
+        end
+
+        set -l max_width (string length $close_matches | sort --numeric-sort)[-1]
+
+        set -l len_of_longest_match 0
+        for exe in $close_matches
+            set len_of_longest_match (math "max $(string length $exe), $len_of_longest_match")
         end
 
         for exe in $close_matches
@@ -208,16 +229,24 @@ function fish_command_not_found -a command_not_found
                 set -l match (string sub --start=$start --length=$offset -- $exe)
                 set -l after (string sub --start=(math "$start + $offset") -- $exe)
 
-                printf '\t%s%s%s%s%s%s%s%s%s' \
+                printf '\t%s%s%s%s%s%s%s%s%s%s' \
                     (set_color $fish_color_command --dim) $before $reset \
-                    (set_color $fish_color_command --italics) $match $reset \
-                    (set_color $fish_color_command --dim) $after $reset
+                    (set_color $fish_color_match --bold --italics) $match $reset \
+                    (set_color $fish_color_command --dim) $after $reset \
+                    (string repeat --count=(math $len_of_longest_match - (string length "$exe")) ' ')
 
             else
-                printf '\t%s%s%s' (set_color $fish_color_command --dim) $exe $reset
+                printf '\t%s%-*s%s' (set_color $fish_color_command --dim) $len_of_longest_match $exe $reset
             end
 
-            printf '\t %s->%s ' $dim $reset
+            set -l rpad (math $len_of_longest_match - (string length $exe) + 1)
+            # set rpad (string repeat --count=$rpad ' ')
+
+            # printf '%s%s->%s ' $rpad $dim $reset
+            # echo
+            # echo "rpad := $rpad"
+            # printf '%-*s->%s ' $len_of_longest_match $dim $reset
+            printf ' %s->%s ' $dim $reset
             if functions -q nix-store-highlight
                 command --search $exe | path resolve | nix-store-highlight
             else
@@ -228,7 +257,6 @@ function fish_command_not_found -a command_not_found
     end
 
     # set -l len_command_not_found (string length -- $command_not_found)
-
 
     # set -q nix_command_not_found_suggest_matching_prefix
     # or set -U nix_command_not_found_suggest_matching_prefix 1
@@ -265,7 +293,6 @@ function fish_command_not_found -a command_not_found
     #     #     end
     #     # end
     # end
-
 
     # TODO: also suggest matching `abbr --list` abbreviations
     set -q nix_command_not_found_suggest_close_functions_n
@@ -310,4 +337,38 @@ function fish_command_not_found -a command_not_found
 
     # TODO: look through $PWD/* for executables and check those names, and if close then suggest the relative path to it
     # Probably need a pretty elaborate filter not to include a lot of .so files in rust ./target folder or cmake ./build folder
+    # but only if the typed command start with ./
+
+    # TODO: Look through `builtin --names`
+    # Add a hyprlink to the fishshell docs for each item
+
+    set -q nix_command_not_found_suggest_builtin_n
+    or set -U nix_command_not_found_suggest_builtin_n 5
+    set -q nix_command_not_found_suggest_builtin_cutoff
+    or set -U nix_command_not_found_suggest_builtin_cutoff 0.7
+
+    set -q nix_command_not_found_suggest_builtin
+    or set -U nix_command_not_found_suggest_builtin 1
+    if test $nix_command_not_found_suggest_builtin -eq 1
+        set -l builtin (builtin --names)
+
+        set -l close_matches (builtin --names | get_close_matches $command_not_found $nix_command_not_found_suggest_builtin_n $nix_command_not_found_suggest_builtin_cutoff)
+
+        set -l n_close_matches (count $close_matches)
+
+        printf '%s\n' $close_matches
+    end
+
+    # TODO: Look through available flatpaks, and what is available at flathub
+    if command -q flatpak
+        set -l installed_flatpak_app_ids (command flatpak list --app --columns=application)[1..]
+        # TODO: see python docs if you can instead return the indices of the closest matches
+        # as then we can refer to the full app-id and not just the name
+        # difflib.get_close_matches
+        # io.github.zen_browser.zen
+        set -l names
+        # flatpak list --app --columns=application | string match --regex --groups-only '\.([^.]+)$'
+    end
+
+    # TODO: add snap support
 end
